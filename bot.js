@@ -4,6 +4,9 @@ const axios = require('axios');
 const FormData = require('form-data');
 puppeteer.use(StealthPlugin());
 
+// ==========================================
+// 1. THE BOT'S BRAIN (Game Data & Chat Only)
+// ==========================================
 const BOT_INJECTION = `
 (function() {
     window.myLiveGameState = null;
@@ -12,7 +15,7 @@ const BOT_INJECTION = `
 
     console.log("[Bot Core] Injected before load!");
 
-    // --- 1. GAME DATA HOOKS ---
+    // Game Data Hooks
     const bkpDefineProperty = Object.defineProperty;
     Object.defineProperty = function(obj, prop, descriptor) {
         if (prop === 'patch' && descriptor && typeof descriptor.value === 'function') {
@@ -69,7 +72,7 @@ const BOT_INJECTION = `
         return players;
     }
 
-    // --- 2. MESSAGE QUEUE ---
+    // Message Queue
     const messageQueue =[];
     let isProcessingQueue = false;
 
@@ -110,7 +113,7 @@ const BOT_INJECTION = `
         if (!isProcessingQueue) processQueue();
     }
 
-    // --- 3. CHAT LISTENER ---
+    // Chat Listener
     setInterval(() => {
         const chatContainer = document.querySelector('.ChatMessages');
         if (chatContainer && !window.chatObserverAttached) {
@@ -144,27 +147,12 @@ const BOT_INJECTION = `
             console.log("[Bot] Chat listener attached!");
         }
     }, 2000);
-
-    // --- 4. AUTO-RECONNECT (TRY AGAIN) WATCHER ---
-    setInterval(() => {
-        // Look for the specific Try Again button using its unique classes
-        const tryAgainButtons = document.querySelectorAll('.PromptPopupNotificationBodyPrimaryButton');
-        
-        tryAgainButtons.forEach(btn => {
-            if (btn.innerText && btn.innerText.includes('Try Again')) {
-                console.log("[Bot System] Disconnect detected! Clicking 'Try Again' button...");
-                
-                // Click it via standard click and simulated mouse events for React compatibility
-                btn.click();
-                btn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
-                btn.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
-            }
-        });
-    }, 2000); // Checks the screen every 2 seconds
-
 })();
 `;
 
+// ==========================================
+// 2. PUPPETEER HEADLESS LAUNCHER
+// ==========================================
 (async () => {
     const browser = await puppeteer.launch({
         headless: 'new',
@@ -179,87 +167,107 @@ const BOT_INJECTION = `
 
     const page = await browser.newPage();
 
-    // Route browser logs to GitHub Actions terminal
     page.on('console', msg => {
         if(msg.text().includes('[Bot]') || msg.text().includes('[GAME CHAT]') || msg.text().includes('[Bot System]')) {
             console.log(msg.text());
         }
     });
 
-    // INJECT BOT BRAIN BEFORE PAGE LOAD
     await page.evaluateOnNewDocument(BOT_INJECTION);
 
     console.log("Navigating to game...");
     await page.goto('https://bloxd.io/play/classic/%F0%9F%A9%B8%F0%9F%A9%B8lifesteal%F0%9F%98%88', { waitUntil: 'networkidle2' });
 
     // ==========================================
-    // CLOUDFLARE TURNSTILE CAPTCHA SOLVER
+    // 3. MASTER SCREEN-STATE LOOP (Runs every 2s)
     // ==========================================
-    try {
-        console.log("Checking for Cloudflare 'Verify you are human' CAPTCHA...");
-        
-        // Wait up to 10 seconds for the Turnstile iframe to appear
-        const cfIframe = await page.waitForSelector('iframe[src*="cloudflare"]', { timeout: 10000 });
-        
-        if (cfIframe) {
-            console.log("[Bot System] CAPTCHA detected! Calculating coordinates...");
-            
-            // Get the exact X, Y bounding box of the iframe on the virtual screen
-            const box = await cfIframe.boundingBox();
-            
-            if (box) {
-                // The Turnstile checkbox is generally 30-40 pixels from the left edge 
-                // and vertically centered inside the iframe.
-                const targetX = box.x + 40; 
-                const targetY = box.y + (box.height / 2);
-
-                console.log(`[Bot System] Moving mouse to X:${targetX}, Y:${targetY}`);
-
-                // 1. Move mouse smoothly over 25 steps to simulate human hand movement
-                await page.mouse.move(targetX, targetY, { steps: 25 });
+    setInterval(async () => {
+        try {
+            // Evaluate what is currently visible on the screen
+            const state = await page.evaluate(() => {
                 
-                // 2. Pause for a random fraction of a second
+                // State 1: Is there a Captcha? (Searches for ALL iframes just to be safe)
+                const iframes = Array.from(document.querySelectorAll('iframe'));
+                // Turnstile often uses src containing challenges.cloudflare.com
+                const cfIframe = iframes.find(f => f.src.includes('cloudflare') || f.src.includes('turnstile'));
+                
+                // Fallback: If text "Human or Iron Watermelon??" is on screen, there is a captcha.
+                const hasCaptchaText = document.body.innerText.includes("Human or Iron Watermelon");
+
+                if (cfIframe && cfIframe.getBoundingClientRect().width > 0) {
+                    return { action: 'captcha', rect: cfIframe.getBoundingClientRect() };
+                }
+                // If we see the text but couldn't identify the iframe by URL, just grab the first visible iframe
+                if (hasCaptchaText && iframes.length > 0) {
+                    const visibleIframe = iframes.find(f => f.getBoundingClientRect().width > 0);
+                    if (visibleIframe) return { action: 'captcha', rect: visibleIframe.getBoundingClientRect() };
+                }
+
+                // State 2: Is the "Try Again" button visible?
+                const allButtons = Array.from(document.querySelectorAll('div[role="button"], button'));
+                const tryAgainBtn = allButtons.find(btn => btn.innerText && btn.innerText.includes('Try Again'));
+                if (tryAgainBtn && tryAgainBtn.getBoundingClientRect().width > 0) {
+                    return { action: 'reconnect' };
+                }
+
+                // State 3: Is the "Play" (Login) button visible?
+                const nameInput = document.querySelector('input[type="text"]');
+                const playBtn = allButtons.find(btn => btn.innerText && (btn.innerText.includes('Play') || btn.innerText.includes('Join')));
+                if (nameInput && playBtn && playBtn.getBoundingClientRect().width > 0) {
+                    return { action: 'login' };
+                }
+
+                return { action: 'idle' };
+            });
+
+            // EXECUTE ACTIONS BASED ON STATE
+            if (state.action === 'login') {
+                console.log("[Bot System] Found Login Screen. Entering name...");
+                await page.type('input[type="text"]', 'GitHub_Bot_01');
+                await page.evaluate(() => {
+                    const btns = Array.from(document.querySelectorAll('div[role="button"], button'));
+                    const playBtn = btns.find(b => b.innerText && (b.innerText.includes('Play') || b.innerText.includes('Join')));
+                    if (playBtn) playBtn.click();
+                });
+                console.log("[Bot System] Clicked Play!");
+            }
+            else if (state.action === 'reconnect') {
+                console.log("[Bot System] Disconnect detected. Clicking 'Try Again'...");
+                await page.evaluate(() => {
+                    const btns = Array.from(document.querySelectorAll('div[role="button"], button'));
+                    const tryAgainBtn = btns.find(b => b.innerText && b.innerText.includes('Try Again'));
+                    if (tryAgainBtn) tryAgainBtn.click();
+                });
+            }
+            else if (state.action === 'captcha') {
+                console.log("[Bot System] CAPTCHA detected! Taking control of mouse...");
+                const rect = state.rect;
+                
+                // Calculate box target coords
+                const targetX = rect.x + 40; 
+                const targetY = rect.y + (rect.height / 2);
+
+                // Simulate human mouse movements
+                await page.mouse.move(targetX, targetY, { steps: 25 });
                 await new Promise(r => setTimeout(r, Math.random() * 400 + 200));
                 
-                // 3. Perform a human click (mouse down, slight delay, mouse up)
                 await page.mouse.down();
                 await new Promise(r => setTimeout(r, Math.random() * 50 + 50));
                 await page.mouse.up();
                 
-                console.log("[Bot System] Clicked! Waiting for CAPTCHA to resolve...");
-                await new Promise(r => setTimeout(r, 6000)); // Give it 6 seconds to verify and fade out
+                console.log("[Bot System] Solved CAPTCHA! Waiting for it to disappear...");
+                // Pause the loop for 6 seconds so it doesn't double-click
+                await new Promise(r => setTimeout(r, 6000));
             }
+
+        } catch (err) {
+            // Ignore temporary errors when navigating
         }
-    } catch (err) {
-        // If it times out, it means the CAPTCHA didn't pop up (which is good!)
-        console.log("[Bot System] No CAPTCHA detected. Proceeding...");
-    }
+    }, 2500); // Master loop runs every 2.5 seconds
+
 
     // ==========================================
-    // Login automation
-    // ==========================================
-    try {
-        console.log("Waiting for Login menu...");
-        
-        await page.waitForSelector('input[type="text"]', { timeout: 30000 });
-        
-        await page.type('input[type="text"]', 'GitHub_Bot_01');
-        
-        await page.evaluate(() => {
-            const buttons = Array.from(document.querySelectorAll('button'));
-            const playBtn = buttons.find(b => b.innerText.includes('Play') || b.innerText.includes('Join'));
-            if (playBtn) playBtn.click();
-        });
-
-        console.log("Successfully clicked Play. Bot should be connected now!");
-    } catch (err) {
-        console.log("Auto-login error (might already be bypassed): ", err.message);
-    }
-
-    console.log("Bot is online! Starting screenshot loop...");
-
-    // ==========================================
-    // SCREENSHOT SENDER LOOP (Every 10 seconds)
+    // 4. DISCORD SCREENSHOT LOOP (Every 10s)
     // ==========================================
     setInterval(async () => {
         try {
@@ -275,10 +283,8 @@ const BOT_INJECTION = `
                 });
             }
         } catch(err) {
-            console.log("[System] Screenshot error: ", err.message);
+            // Ignoring screenshot errors
         }
     }, 10000); 
 
-    // Keep the Node process running
-    await new Promise(() => {}); 
 })();
