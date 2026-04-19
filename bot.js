@@ -187,14 +187,58 @@ const BOT_INJECTION = `
         }
     });
 
-    await page.evaluateOnNewDocument(BOT_INJECTION);
-
-    console.log("Navigating to game...");
+   console.log("Navigating to game...");
     await page.goto('https://bloxd.io/play/classic/%F0%9F%A9%B8%F0%9F%A9%B8lifesteal%F0%9F%98%88', { waitUntil: 'networkidle2' });
 
+    // ==========================================
+    // CLOUDFLARE TURNSTILE CAPTCHA SOLVER
+    // ==========================================
+    try {
+        console.log("Checking for Cloudflare 'Verify you are human' CAPTCHA...");
+        
+        // Wait up to 10 seconds for the Turnstile iframe to appear
+        const cfIframe = await page.waitForSelector('iframe[src*="cloudflare"]', { timeout: 10000 });
+        
+        if (cfIframe) {
+            console.log("[Bot System] CAPTCHA detected! Calculating coordinates...");
+            
+            // Get the exact X, Y bounding box of the iframe on the virtual screen
+            const box = await cfIframe.boundingBox();
+            
+            if (box) {
+                // The Turnstile checkbox is generally 30-40 pixels from the left edge 
+                // and vertically centered inside the iframe.
+                const targetX = box.x + 40; 
+                const targetY = box.y + (box.height / 2);
+
+                console.log(`[Bot System] Moving mouse to X:${targetX}, Y:${targetY}`);
+
+                // 1. Move mouse smoothly over 25 steps to simulate human hand movement
+                await page.mouse.move(targetX, targetY, { steps: 25 });
+                
+                // 2. Pause for a random fraction of a second
+                await new Promise(r => setTimeout(r, Math.random() * 400 + 200));
+                
+                // 3. Perform a human click (mouse down, slight delay, mouse up)
+                await page.mouse.down();
+                await new Promise(r => setTimeout(r, Math.random() * 50 + 50));
+                await page.mouse.up();
+                
+                console.log("[Bot System] Clicked! Waiting for CAPTCHA to resolve...");
+                await new Promise(r => setTimeout(r, 6000)); // Give it 6 seconds to verify and fade out
+            }
+        }
+    } catch (err) {
+        // If it times out, it means the CAPTCHA didn't pop up (which is good!)
+        console.log("[Bot System] No CAPTCHA detected. Proceeding...");
+    }
+
+    // ==========================================
     // Login automation
+    // ==========================================
     try {
         console.log("Waiting for Login menu...");
+        
         await page.waitForSelector('input[type="text"]', { timeout: 30000 });
         
         await page.type('input[type="text"]', 'GitHub_Bot_01');
