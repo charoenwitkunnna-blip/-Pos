@@ -1,7 +1,7 @@
 {
   "name": "bloxd-github-bot",
   "version": "1.0.0",
-  "description": "Headless Bloxd.io Bot",
+  "description": "Headless Bloxd Bot",
   "main": "bot.js",
   "scripts": {
     "start": "node bot.js"
@@ -9,6 +9,8 @@
   "dependencies": {
     "puppeteer": "^22.0.0",
     "puppeteer-extra": "^3.3.6",
-    "puppeteer-extra-plugin-stealth": "^2.11.2"
+    "puppeteer-extra-plugin-stealth": "^2.11.2",
+    "axios": "^1.6.7",
+    "form-data": "^4.0.0"
   }
 }
