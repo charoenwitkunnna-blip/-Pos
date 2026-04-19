@@ -1,0 +1,35 @@
+name: Bloxd 6-Hour Bot
+
+on:
+  # Allows you to click a button on GitHub to start it manually
+  workflow_dispatch: 
+  
+  # Runs automatically every 6 hours
+  schedule:
+    - cron: '0 */6 * * *' 
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    
+    # GitHub Action max timeout is 360 minutes (6 hours)
+    timeout-minutes: 360 
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      - name: Install Dependencies
+        run: npm install
+
+      - name: Install Display Server for Headless WebGL
+        run: sudo apt-get install -y xvfb
+
+      - name: Run Bot
+        # xvfb-run fakes a monitor, allowing Canvas/WebGL to render in the cloud
+        run: xvfb-run --auto-servernum npm start
