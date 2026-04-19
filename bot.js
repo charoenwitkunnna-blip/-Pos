@@ -172,7 +172,7 @@ const BOT_INJECTION = `
 
     // 4. Change URL to the specific lobby/room you want the bot in
     console.log("Navigating to game...");
-    await page.goto('https://bloxd.io/?lobby=survival&room=your_room_name_here', { waitUntil: 'networkidle2' });
+    await page.goto('https://bloxd.io/play/classic/%F0%9F%A9%B8%F0%9F%A9%B8lifesteal%F0%9F%98%88', { waitUntil: 'networkidle2' });
 
     // 5. Auto-Login Logic (Bloxd requires typing a name and clicking "Play")
     try {
