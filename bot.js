@@ -12,6 +12,7 @@ const BOT_INJECTION = `
 
     console.log("[Bot Core] Injected before load!");
 
+    // --- 1. GAME DATA HOOKS ---
     const bkpDefineProperty = Object.defineProperty;
     Object.defineProperty = function(obj, prop, descriptor) {
         if (prop === 'patch' && descriptor && typeof descriptor.value === 'function') {
@@ -68,6 +69,7 @@ const BOT_INJECTION = `
         return players;
     }
 
+    // --- 2. MESSAGE QUEUE ---
     const messageQueue =[];
     let isProcessingQueue = false;
 
@@ -108,6 +110,7 @@ const BOT_INJECTION = `
         if (!isProcessingQueue) processQueue();
     }
 
+    // --- 3. CHAT LISTENER ---
     setInterval(() => {
         const chatContainer = document.querySelector('.ChatMessages');
         if (chatContainer && !window.chatObserverAttached) {
@@ -141,6 +144,25 @@ const BOT_INJECTION = `
             console.log("[Bot] Chat listener attached!");
         }
     }, 2000);
+
+    // --- 4. AUTO-RECONNECT (TRY AGAIN) WATCHER ---
+    setInterval(() => {
+        // Look for the specific Try Again button using its unique classes
+        const tryAgainButtons = document.querySelectorAll('.PromptPopupNotificationBodyPrimaryButton');
+        
+        tryAgainButtons.forEach(btn => {
+            // Double check that it actually says "Try Again" just to be safe
+            if (btn.innerText && btn.innerText.includes('Try Again')) {
+                console.log("[Bot System] Disconnect detected! Clicking 'Try Again' button...");
+                
+                // Click it via standard click and simulated mouse events for React compatibility
+                btn.click();
+                btn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+                btn.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+            }
+        });
+    }, 2000); // Checks the screen every 2 seconds
+
 })();
 `;
 
@@ -158,8 +180,9 @@ const BOT_INJECTION = `
 
     const page = await browser.newPage();
 
+    // Route browser logs to GitHub Actions terminal
     page.on('console', msg => {
-        if(msg.text().includes('[Bot]') || msg.text().includes('[GAME CHAT]')) {
+        if(msg.text().includes('[Bot]') || msg.text().includes('[GAME CHAT]') || msg.text().includes('[Bot System]')) {
             console.log(msg.text());
         }
     });
@@ -167,9 +190,9 @@ const BOT_INJECTION = `
     await page.evaluateOnNewDocument(BOT_INJECTION);
 
     console.log("Navigating to game...");
-    // USING YOUR SPECIFIC SERVER URL
     await page.goto('https://bloxd.io/play/classic/%F0%9F%A9%B8%F0%9F%A9%B8lifesteal%F0%9F%98%88', { waitUntil: 'networkidle2' });
 
+    // Login automation
     try {
         console.log("Waiting for Login menu...");
         await page.waitForSelector('input[type="text"]', { timeout: 30000 });
@@ -189,12 +212,9 @@ const BOT_INJECTION = `
 
     console.log("Bot is online! Starting screenshot loop...");
 
-    // ==========================================
-    // SCREENSHOT SENDER LOOP (Every 10 seconds)
-    // ==========================================
+    // Screenshot sender loop (Every 10 seconds)
     setInterval(async () => {
         try {
-            // Take the screenshot (JPEG compressed to save data)
             const imageBuffer = await page.screenshot({ type: 'jpeg', quality: 50 });
             
             const webhookUrl = process.env.DISCORD_WEBHOOK;
@@ -205,14 +225,12 @@ const BOT_INJECTION = `
                 await axios.post(webhookUrl, form, {
                     headers: form.getHeaders()
                 });
-                console.log("[System] Sent live screenshot to Discord!");
-            } else {
-                console.log("[System] Cannot send screenshot: DISCORD_WEBHOOK secret is not set in GitHub.");
             }
         } catch(err) {
             console.log("[System] Screenshot error: ", err.message);
         }
-    }, 10000); // 10000 ms = 10 seconds
+    }, 10000); 
 
+    // Keep the Node process running
     await new Promise(() => {}); 
 })();
