@@ -48,7 +48,7 @@ const BOT_INJECTION = `
     };
 
     function getPlayers() {
-        const players = [];
+        const players =[];
         let items =[];
         if (window.myLiveGameState && window.myLiveGameState.entities) {
             const entities = window.myLiveGameState.entities;
@@ -151,7 +151,6 @@ const BOT_INJECTION = `
         const tryAgainButtons = document.querySelectorAll('.PromptPopupNotificationBodyPrimaryButton');
         
         tryAgainButtons.forEach(btn => {
-            // Double check that it actually says "Try Again" just to be safe
             if (btn.innerText && btn.innerText.includes('Try Again')) {
                 console.log("[Bot System] Disconnect detected! Clicking 'Try Again' button...");
                 
@@ -187,7 +186,10 @@ const BOT_INJECTION = `
         }
     });
 
-   console.log("Navigating to game...");
+    // INJECT BOT BRAIN BEFORE PAGE LOAD
+    await page.evaluateOnNewDocument(BOT_INJECTION);
+
+    console.log("Navigating to game...");
     await page.goto('https://bloxd.io/play/classic/%F0%9F%A9%B8%F0%9F%A9%B8lifesteal%F0%9F%98%88', { waitUntil: 'networkidle2' });
 
     // ==========================================
@@ -256,7 +258,9 @@ const BOT_INJECTION = `
 
     console.log("Bot is online! Starting screenshot loop...");
 
-    // Screenshot sender loop (Every 10 seconds)
+    // ==========================================
+    // SCREENSHOT SENDER LOOP (Every 10 seconds)
+    // ==========================================
     setInterval(async () => {
         try {
             const imageBuffer = await page.screenshot({ type: 'jpeg', quality: 50 });
