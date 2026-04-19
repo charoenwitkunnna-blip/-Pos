@@ -1,9 +1,9 @@
 const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+const axios = require('axios');
+const FormData = require('form-data');
 puppeteer.use(StealthPlugin());
 
-// --- YOUR SCRIPT INJECTED HERE ---
-// We removed the HUD since nobody is looking at the screen in the cloud.
 const BOT_INJECTION = `
 (function() {
     window.myLiveGameState = null;
@@ -108,7 +108,6 @@ const BOT_INJECTION = `
         if (!isProcessingQueue) processQueue();
     }
 
-    // Command Listener
     setInterval(() => {
         const chatContainer = document.querySelector('.ChatMessages');
         if (chatContainer && !window.chatObserverAttached) {
@@ -118,7 +117,7 @@ const BOT_INJECTION = `
                     mutation.addedNodes.forEach(node => {
                         if (node.classList && node.classList.contains('MessageWrapper')) {
                             const fullMsg = node.innerText || node.textContent;
-                            console.log("[GAME CHAT] " + fullMsg); // Pipes to GitHub Actions logs
+                            console.log("[GAME CHAT] " + fullMsg); 
                             
                             const splitIndex = fullMsg.indexOf(': ');
                             if (splitIndex !== -1) {
@@ -146,13 +145,12 @@ const BOT_INJECTION = `
 `;
 
 (async () => {
-    // 1. Launch the headless browser (optimized for WebGL in the cloud)
     const browser = await puppeteer.launch({
         headless: 'new',
         args:[
             '--no-sandbox',
             '--disable-setuid-sandbox',
-            '--use-gl=egl', // Crucial for WebGL games
+            '--use-gl=egl',
             '--mute-audio',
             '--window-size=1280,720'
         ]
@@ -160,32 +158,24 @@ const BOT_INJECTION = `
 
     const page = await browser.newPage();
 
-    // 2. Pipe browser console to Node terminal (so you can see chat in GitHub Actions)
     page.on('console', msg => {
         if(msg.text().includes('[Bot]') || msg.text().includes('[GAME CHAT]')) {
             console.log(msg.text());
         }
     });
 
-    // 3. Inject the Tampermonkey script BEFORE the page loads
     await page.evaluateOnNewDocument(BOT_INJECTION);
 
-    // 4. Change URL to the specific lobby/room you want the bot in
     console.log("Navigating to game...");
+    // USING YOUR SPECIFIC SERVER URL
     await page.goto('https://bloxd.io/play/classic/%F0%9F%A9%B8%F0%9F%A9%B8lifesteal%F0%9F%98%88', { waitUntil: 'networkidle2' });
 
-    // 5. Auto-Login Logic (Bloxd requires typing a name and clicking "Play")
     try {
         console.log("Waiting for Login menu...");
-        
-        // Wait for the name input box (Adjust selector if Bloxd updates)
         await page.waitForSelector('input[type="text"]', { timeout: 30000 });
         
-        // Type the bot's name
         await page.type('input[type="text"]', 'GitHub_Bot_01');
         
-        // Find and click the play button (often a big button with text "Play" or similar)
-        // We use evaluate to easily find the button by its text content
         await page.evaluate(() => {
             const buttons = Array.from(document.querySelectorAll('button'));
             const playBtn = buttons.find(b => b.innerText.includes('Play') || b.innerText.includes('Join'));
@@ -194,11 +184,35 @@ const BOT_INJECTION = `
 
         console.log("Successfully clicked Play. Bot should be connected now!");
     } catch (err) {
-        console.log("Auto-login failed or wasn't needed. Error: ", err.message);
+        console.log("Auto-login error (might already be bypassed): ", err.message);
     }
 
-    console.log("Bot is online! Will keep process alive for 6 hours...");
-    
-    // 6. Keep the script running forever (GitHub Actions will kill it after 6 hours)
+    console.log("Bot is online! Starting screenshot loop...");
+
+    // ==========================================
+    // SCREENSHOT SENDER LOOP (Every 10 seconds)
+    // ==========================================
+    setInterval(async () => {
+        try {
+            // Take the screenshot (JPEG compressed to save data)
+            const imageBuffer = await page.screenshot({ type: 'jpeg', quality: 50 });
+            
+            const webhookUrl = process.env.DISCORD_WEBHOOK;
+            if (webhookUrl) {
+                const form = new FormData();
+                form.append('file', imageBuffer, 'screenshot.jpg');
+                
+                await axios.post(webhookUrl, form, {
+                    headers: form.getHeaders()
+                });
+                console.log("[System] Sent live screenshot to Discord!");
+            } else {
+                console.log("[System] Cannot send screenshot: DISCORD_WEBHOOK secret is not set in GitHub.");
+            }
+        } catch(err) {
+            console.log("[System] Screenshot error: ", err.message);
+        }
+    }, 10000); // 10000 ms = 10 seconds
+
     await new Promise(() => {}); 
 })();
