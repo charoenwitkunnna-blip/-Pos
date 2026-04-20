@@ -6,60 +6,79 @@ import time
 
 CHAPTER_URL = "https://manhuaus.com/manga/infinite-mage/chapter-122/"
 
-print(f"Bypassing Cloudflare for: {CHAPTER_URL}")
-
+print(f"Loading: {CHAPTER_URL}")
 image_urls =[]
 
-# 1. Use SeleniumBase Context Manager
-# uc=True applies the Undetected Chrome patches
-# xvfb=True creates the virtual monitor so Cloudflare doesn't flag you as headless
-with SB(uc=True, xvfb=True, test=True, locale_code="en") as sb:
+# 1. Launch Undetected Browser with Virtual Display
+with SB(uc=True, xvfb=True, locale_code="en") as sb:
     
-    # uc_open_with_reconnect temporarily disconnects WebDriver from Chrome
-    # This prevents Cloudflare from seeing the bot while the page initially loads
+    # Temporarily disconnects WebDriver from Chrome to bypass initial CF detection
     sb.uc_open_with_reconnect(CHAPTER_URL, reconnect_time=6)
     
-    print("Waiting for page to settle...")
-    sb.sleep(5)
+    print("Checking for Cloudflare protection...")
     
+    # 2. Redirect / Verification Countermeasure
+    # Attempt to click the Turnstile if it's there
     try:
-        # This is SeleniumBase's magic method that uses PyAutoGUI to physically 
-        # move the mouse and click the Turnstile checkbox if it exists.
         sb.uc_gui_click_captcha()
-        print("Captcha click attempted.")
-        sb.sleep(5)
-    except Exception as e:
-        print("No Captcha click needed or failed (Continuing...)")
+        print("Captcha clicked. Waiting for resolution...")
+    except Exception:
+        pass # If no captcha needs clicking, it will just continue
+        
+    print("Waiting for Cloudflare redirect to finish...")
+    
+    # Wait up to 30 seconds for the actual manga images class to load into the HTML
+    # This automatically pauses the script while Cloudflare refreshes the page
+    try:
+        sb.wait_for_element(".wp-manga-chapter-img", timeout=30)
+        print("Successfully bypassed Cloudflare! Manga page is loading.")
+    except Exception:
+        print("CRITICAL: Timed out waiting for Cloudflare redirect.")
+        sb.save_screenshot("debug_screenshot.png")
+        print("Check 'debug_screenshot.png' in GitHub Artifacts to see what went wrong.")
+        exit(1)
 
-    print("Taking debug screenshot...")
-    # This will be uploaded to GitHub artifacts so you can see exactly what happened
+    # 3. Trigger Lazy Loading
+    # Manhua sites only load the image src when you scroll down. 
+    print("Scrolling down to trigger lazy-loaded images...")
+    sb.execute_script("window.scrollTo(0, document.body.scrollHeight/4);")
+    time.sleep(2)
+    sb.execute_script("window.scrollTo(0, document.body.scrollHeight/2);")
+    time.sleep(2)
+    sb.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+    time.sleep(2)
+
+    # Take a screenshot to prove we made it to the chapter!
     sb.save_screenshot("debug_screenshot.png")
-    print("Screenshot saved!")
 
-    # 2. Extract Image URLs
+    # 4. Extract Image URLs
     images = sb.find_elements("css selector", ".wp-manga-chapter-img")
     
     for img in images:
+        # Check both lazy-load attribute and standard src
         src = img.get_attribute("data-src") or img.get_attribute("src")
         if src:
             image_urls.append(src.strip())
             
     print(f"Found {len(image_urls)} images.")
-    
-# CRITICAL: Exiting the 'with SB' block automatically closes the browser 
-# and frees up the 2GB+ of RAM so Ollama has enough memory to run!
+
+# ---------------------------------------------------------
+# AT THIS POINT THE BROWSER CLOSES TO FREE RAM FOR THE AI
+# ---------------------------------------------------------
 
 if len(image_urls) == 0:
-    print("CRITICAL: Still couldn't find images. Check 'debug_screenshot.png' in the GitHub Action Artifacts.")
+    print("Failed to find image URLs even after redirect.")
     exit(1)
 
-# 3. Process Images with Local AI (Ollama)
+# 5. Process Images with Local AI (Ollama)
+# We sample the start, middle, and end panels so the Action finishes fast
 target_indices =[0, 1, 2, len(image_urls)//2, len(image_urls)-3, len(image_urls)-2, len(image_urls)-1]
 scene_descriptions =[]
 
+# Pretend to be a normal browser downloading the raw image files
 headers = {
     "Referer": "https://manhuaus.com/",
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 }
 
 for idx in target_indices:
@@ -95,7 +114,7 @@ for idx in target_indices:
     except Exception as e:
         print(f"Error processing image {idx+1}: {e}")
 
-# 4. Save the Recap to your Repo
+# 6. Save the Recap to your Repo
 if scene_descriptions:
     print("Combining scenes into final recap...")
     final_recap = "\n".join(scene_descriptions)
